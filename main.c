@@ -1,6 +1,6 @@
 #include "raylib.h"
 #include <math.h>
-#include <stdio.h>
+#include <stdio.h>     // For snprintf
 
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 600
@@ -42,8 +42,26 @@ Vector2 CalculateConvexPath(float t) {
     return (Vector2){t * SCREEN_WIDTH, y};
 }
 
+// Sinusoidal path calculation using x86-64 inline assembly
 Vector2 CalculateSinusoidalPath(float t) {
-    float y = SCREEN_HEIGHT / 2 + 100 * sinf(t * 4 * PI);
+    float y;
+    float four_pi = 4.0f * PI;
+    float amplitude = 100.0f;
+    float offset = SCREEN_HEIGHT / 2.0f;
+
+    // Inline assembly to compute y = offset + amplitude * sin(t * four_pi)
+    __asm__ volatile (
+        "movss %[t], %%xmm0\n"          // Load t into xmm0
+        "mulss %[four_pi], %%xmm0\n"    // Multiply xmm0 by four_pi (t * 4 * PI)
+        "call sinf\n"                   // Call sinf function (result in xmm0)
+        "mulss %[amplitude], %%xmm0\n"  // Multiply result by amplitude
+        "addss %[offset], %%xmm0\n"     // Add offset to the result
+        "movss %%xmm0, %[y]\n"          // Store the result in y
+        : [y] "=m" (y)                  // Output
+        : [t] "m" (t), [four_pi] "m" (four_pi), [amplitude] "m" (amplitude), [offset] "m" (offset) // Inputs
+        : "xmm0", "memory"              // Clobbered registers and memory
+    );
+
     return (Vector2){t * SCREEN_WIDTH, y};
 }
 
