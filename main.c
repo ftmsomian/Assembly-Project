@@ -36,7 +36,7 @@ Vector2 CalculateSinusoidalPath(float t) {
 // Benchmark Function
 void BenchmarkPathFunctions() {
     clock_t start, end;
-    const int iterations = 100000;  // Increase iterations for more accurate timing
+    const int iterations = 10000000;  // Increase iterations for more accurate timing
     
     start = clock();
     for (int i = 0; i < iterations; i++) {
