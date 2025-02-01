@@ -1,5 +1,6 @@
 #include "raylib.h"
 #include <math.h>
+#include <stdio.h>
 
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 600
@@ -59,6 +60,9 @@ int main() {
     int selectedPath = PATH_STRAIGHT;
     float t = 0.0f;
     bool isMoving = false;
+    double startTime = 0.0;
+    double endTime = 0.0;
+    bool hasStopped = false;
 
     SetTargetFPS(60);
 
@@ -68,11 +72,23 @@ int main() {
         if (IsKeyPressed(KEY_TWO)) selectedPath = PATH_ANGULAR;
         if (IsKeyPressed(KEY_THREE)) selectedPath = PATH_CONVEX;
         if (IsKeyPressed(KEY_FOUR)) selectedPath = PATH_SINUSOIDAL;
-        if (IsKeyPressed(KEY_SPACE)) isMoving = !isMoving;
+        if (IsKeyPressed(KEY_SPACE)) {
+            isMoving = !isMoving;
+            if (isMoving) {
+                startTime = GetTime(); // Record start time when movement begins
+                hasStopped = false;
+            } else {
+                endTime = GetTime(); // Record end time when movement stops
+                hasStopped = true;
+            }
+        }
 
         // Update ball position and rotation
-        if (isMoving && t < 1.0f) {
+        if (isMoving) {
             t += 0.01f;
+            if (t >= 1.0f) {
+                t = 0.0f; // Reset t to 0 to repeat the movement
+            }
             switch (selectedPath) {
                 case PATH_STRAIGHT:
                     ball.position = CalculateStraightPath(t);
@@ -106,6 +122,14 @@ int main() {
         DrawText("Press 3: Convex Path", 10, 70, 20, DARKGRAY);
         DrawText("Press 4: Sinusoidal Path", 10, 100, 20, DARKGRAY);
         DrawText("Press SPACE: Start/Stop", 10, 130, 20, DARKGRAY);
+
+        // Display execution time if the ball has stopped
+        if (hasStopped) {
+            double elapsedTime = endTime - startTime;
+            char timeText[50];
+            snprintf(timeText, sizeof(timeText), "Execution Time: %.2f seconds", elapsedTime);
+            DrawText(timeText, 10, SCREEN_HEIGHT - 30, 20, DARKGRAY);
+        }
 
         EndDrawing();
     }
