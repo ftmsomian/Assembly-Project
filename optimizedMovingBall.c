@@ -2,6 +2,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <time.h>  // For benchmarking
+#include <stdint.h>
 
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 600
@@ -10,6 +11,11 @@
 #define PATH_ANGULAR 1
 #define PATH_CONVEX 2
 #define PATH_SINUSOIDAL 3
+
+// Precompute constants
+static const float HALF_SCREEN_HEIGHT = SCREEN_HEIGHT / 2.0f;
+static const float HALF_SCREEN_HEIGHT_MINUS_100 = HALF_SCREEN_HEIGHT - 100.0f;
+static const float HALF_SCREEN_HEIGHT_PLUS_100 = HALF_SCREEN_HEIGHT + 100.0f;
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -34,45 +40,62 @@ void DrawStripedBall(Ball ball) {
 
 // Path calculation functions with inline assembly
 Vector2 CalculateStraightPath(float t) {
-    float x;
-    float screenWidth = SCREEN_WIDTH;  // Load SCREEN_WIDTH into a local variable
-    __asm__ volatile (
-        "mulss %[screenWidth], %[t]\n"  // t * SCREEN_WIDTH
-        "movss %[t], %[x]\n"            // Store result in x
-        : [x] "=m" (x)
-        : [t] "x" (t), [screenWidth] "x" (screenWidth)
-        : 
+    Vector2 result;
+    float screen_width = SCREEN_WIDTH;  // Store in local variable
+
+    __asm__ (
+        "mulss %[screen_width], %[t]\n\t"
+        : [t] "+x"(t)
+        : [screen_width] "x"(screen_width)  // Use register constraint
+        : "cc"
     );
-    return (Vector2){x, SCREEN_HEIGHT / 2.0f};
+
+    result.x = t;
+    result.y = HALF_SCREEN_HEIGHT;
+    return result;
 }
+
 
 Vector2 CalculateAngularPath(float t) {
     float x, y_offset;
-    float screenWidth = SCREEN_WIDTH;  // Load SCREEN_WIDTH into a local variable
+    float screenWidth = SCREEN_WIDTH;
     float half = 0.5f, plus_offset = 100.0f, minus_offset = -100.0f;
 
     __asm__ volatile (
         // Compute x = t * SCREEN_WIDTH
-        "mulss %[screenWidth], %[t]\n"
-        "movss %[t], %[x]\n"
-
-        // Compute y_offset based on t < 0.5
         "movss %[t], %%xmm0\n"
-        "ucomiss %[half], %%xmm0\n"
-        "jb 1f\n"
-        "movss %[plus_offset], %[y_offset]\n"
+        "mulss %[screenWidth], %%xmm0\n"
+        "movss %%xmm0, %[x]\n"
+
+        // Compare t with 0.5
+        "movss %[t], %%xmm1\n"
+        "movss %[half], %%xmm2\n"
+        "ucomiss %%xmm2, %%xmm1\n"
+        "jb 1f\n"  // If t < 0.5, jump to label 1
+
+        // If t >= 0.5, use plus_offset
+        "movss %[plus_offset], %%xmm3\n"
+        "movss %%xmm3, %[y_offset]\n"
         "jmp 2f\n"
-        "1: movss %[minus_offset], %[y_offset]\n"
+
+        "1: movss %[minus_offset], %%xmm3\n"  // If t < 0.5, use minus_offset
+        "movss %%xmm3, %[y_offset]\n"
+
         "2:\n"
 
         : [x] "=m" (x), [y_offset] "=m" (y_offset)
         : [t] "x" (t), [screenWidth] "x" (screenWidth),
           [half] "x" (half), [plus_offset] "x" (plus_offset), [minus_offset] "x" (minus_offset)
-        : "xmm0"
+        : "xmm0", "xmm1", "xmm2", "xmm3"
     );
 
     return (Vector2){x, (SCREEN_HEIGHT / 2.0f) + y_offset};
 }
+
+
+
+
+
 
 Vector2 CalculateConvexPath(float t) {
     float x, y;
