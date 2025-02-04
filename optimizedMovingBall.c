@@ -56,44 +56,30 @@ Vector2 CalculateStraightPath(float t) {
 }
 
 
+#include <immintrin.h> // Include for SIMD intrinsics
+
 Vector2 CalculateAngularPath(float t) {
-    float x, y_offset;
-    float screenWidth = SCREEN_WIDTH;
-    float half = 0.5f, plus_offset = 100.0f, minus_offset = -100.0f;
+    // Load the scalar 't' into a SIMD register
+    __m128 t_vec = _mm_set1_ps(t);
 
-    __asm__ volatile (
-        // Compute x = t * SCREEN_WIDTH
-        "movss %[t], %%xmm0\n"
-        "mulss %[screenWidth], %%xmm0\n"
-        "movss %%xmm0, %[x]\n"
+    // Load constants into SIMD registers
+    __m128 screen_width_vec = _mm_set1_ps(SCREEN_WIDTH);
+    __m128 screen_height_vec = _mm_set1_ps(SCREEN_HEIGHT);
+    __m128 one_vec = _mm_set1_ps(1.0f);
 
-        // Compare t with 0.5
-        "movss %[t], %%xmm1\n"
-        "movss %[half], %%xmm2\n"
-        "ucomiss %%xmm2, %%xmm1\n"
-        "jb 1f\n"  // If t < 0.5, jump to label 1
+    // Compute t * SCREEN_WIDTH
+    __m128 x_result = _mm_mul_ps(t_vec, screen_width_vec);
 
-        // If t >= 0.5, use plus_offset
-        "movss %[plus_offset], %%xmm3\n"
-        "movss %%xmm3, %[y_offset]\n"
-        "jmp 2f\n"
+    // Compute (1.0f - t) * SCREEN_HEIGHT
+    __m128 y_result = _mm_mul_ps(_mm_sub_ps(one_vec, t_vec), screen_height_vec);
 
-        "1: movss %[minus_offset], %%xmm3\n"  // If t < 0.5, use minus_offset
-        "movss %%xmm3, %[y_offset]\n"
+    // Extract the results from the SIMD registers
+    Vector2 result;
+    _mm_store_ss(&result.x, x_result);
+    _mm_store_ss(&result.y, y_result);
 
-        "2:\n"
-
-        : [x] "=m" (x), [y_offset] "=m" (y_offset)
-        : [t] "x" (t), [screenWidth] "x" (screenWidth),
-          [half] "x" (half), [plus_offset] "x" (plus_offset), [minus_offset] "x" (minus_offset)
-        : "xmm0", "xmm1", "xmm2", "xmm3"
-    );
-
-    return (Vector2){x, (SCREEN_HEIGHT / 2.0f) + y_offset};
+    return result;
 }
-
-
-
 
 
 
