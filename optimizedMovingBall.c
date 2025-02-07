@@ -1,8 +1,40 @@
-#include "raylib.h"
+// Define macros to prevent Windows from including certain definitions
+#define WIN32_LEAN_AND_MEAN // Prevent unnecessary includes like min/max
+#define NOMINMAX            // Disable the min/max macros to avoid conflicts
+#define NOGDI               // Exclude GDI definitions to avoid conflicting graphical functions
+#define NOUSER              // Exclude user32 (avoiding `DrawTextA` and `LoadImageA` issues)
+#include <raylib.h>         // Include Raylib first
+
+// Explicitly undefine conflicting functions from Windows
+#undef LoadImageA
+#undef DrawTextA
+#undef DrawTextExA
+#undef Rectangle
+#undef CloseWindow
+#undef ShowCursor
+
+// Alias conflicting functions from Raylib to avoid clashes
+#define Rectangle RectangleR
+#define ShowCursor ShowCursorWin
+
+// Provide function aliases if necessary
+void CloseWindowWin(void) {
+    CloseWindow(); // Call the Raylib CloseWindow function
+}
+
+// Now include Windows headers (after Raylib)
+#include <windows.h>        // Include Windows headers
+
 #include <math.h>
+#include <time.h>
 #include <stdio.h>
-#include <time.h>  // For benchmarking
 #include <stdint.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/time.h>
+#endif
 
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 600
@@ -12,14 +44,24 @@
 #define PATH_CONVEX 2
 #define PATH_SINUSOIDAL 3
 
-// Precompute constants
-static const float HALF_SCREEN_HEIGHT = SCREEN_HEIGHT / 2.0f;
-static const float HALF_SCREEN_HEIGHT_MINUS_100 = HALF_SCREEN_HEIGHT - 100.0f;
-static const float HALF_SCREEN_HEIGHT_PLUS_100 = HALF_SCREEN_HEIGHT + 100.0f;
-
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+// High-precision timer function (renamed to avoid Raylib conflict)
+static double GetHighPrecisionTime() {
+#ifdef _WIN32
+    LARGE_INTEGER frequency;
+    LARGE_INTEGER currentTime;
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&currentTime);
+    return (double)currentTime.QuadPart / frequency.QuadPart;
+#else
+    struct timeval currentTime;
+    gettimeofday(&currentTime, NULL);
+    return (double)currentTime.tv_sec + (double)currentTime.tv_usec / 1e6;
+#endif
+}
 
 // Ball structure
 typedef struct {
@@ -34,142 +76,75 @@ void DrawStripedBall(Ball ball) {
     for (int i = 0; i < ball.colorCount; i++) {
         float angleStart = ball.rotation + (i * 360.0f / ball.colorCount);
         float angleEnd = angleStart + (360.0f / ball.colorCount);
-        DrawCircleSector(ball.position, BALL_RADIUS, angleStart, angleEnd, 0, ball.colors[i]);
+        DrawCircleSector(ball.position, BALL_RADIUS, angleStart, angleEnd, 10, ball.colors[i]);
     }
 }
 
-// Path calculation functions with inline assembly
-Vector2 CalculateStraightPath(float t) {
-    Vector2 result;
-    float screen_width = SCREEN_WIDTH;  // Store in local variable
-
-    __asm__ (
-        "mulss %[screen_width], %[t]\n\t"
-        : [t] "+x"(t)
-        : [screen_width] "x"(screen_width)  // Use register constraint
-        : "cc"
-    );
-
-    result.x = t;
-    result.y = HALF_SCREEN_HEIGHT;
+// Path calculation functions
+Vector2 CalculateStraightPath(float t, double *executionTime) {
+    double start = GetHighPrecisionTime();
+    Vector2 result = {t * SCREEN_WIDTH, SCREEN_HEIGHT / 2};
+    double end = GetHighPrecisionTime();
+    *executionTime += (end - start);
     return result;
 }
 
-
-#include <immintrin.h> // Include for SIMD intrinsics
-
-Vector2 CalculateAngularPath(float t) {
-    // Load the scalar 't' into a SIMD register
-    __m128 t_vec = _mm_set1_ps(t);
-
-    // Load constants into SIMD registers
-    __m128 screen_width_vec = _mm_set1_ps(SCREEN_WIDTH);
-    __m128 screen_height_vec = _mm_set1_ps(SCREEN_HEIGHT);
-    __m128 one_vec = _mm_set1_ps(1.0f);
-
-    // Compute t * SCREEN_WIDTH
-    __m128 x_result = _mm_mul_ps(t_vec, screen_width_vec);
-
-    // Compute (1.0f - t) * SCREEN_HEIGHT
-    __m128 y_result = _mm_mul_ps(_mm_sub_ps(one_vec, t_vec), screen_height_vec);
-
-    // Extract the results from the SIMD registers
-    Vector2 result;
-    _mm_store_ss(&result.x, x_result);
-    _mm_store_ss(&result.y, y_result);
-
+Vector2 CalculateAngularPath(float t, double *executionTime) {
+    double start = GetHighPrecisionTime();
+    Vector2 result = {t * SCREEN_WIDTH, SCREEN_HEIGHT * (1.0f - t)};
+    double end = GetHighPrecisionTime();
+    *executionTime += (end - start);
     return result;
 }
 
-
-
-Vector2 CalculateConvexPath(float t) {
+Vector2 CalculateConvexPath(float t, double *executionTime) {
+    double start = GetHighPrecisionTime();
     float x, y;
-    float screenWidth = SCREEN_WIDTH;  // Load SCREEN_WIDTH into a local variable
-    float pi = (float)M_PI, neg_amp = -200.0f, offset = SCREEN_HEIGHT / 2.0f;
-
-    // Compute y using C's sinf function
+    float screenWidth = SCREEN_WIDTH, pi = (float)M_PI, neg_amp = -200.0f, offset = SCREEN_HEIGHT / 2.0f;
     y = offset + neg_amp * sinf(t * pi);
 
+    // Optimized inline assembly using SSE
     __asm__ volatile (
-        // Compute x = t * SCREEN_WIDTH
-        "mulss %[screenWidth], %[t]\n"
-        "movss %[t], %[x]\n"
-
+        "movss %[t], %%xmm0       \n" // Load t into xmm0
+        "mulss %[screenWidth], %%xmm0 \n" // xmm0 = t * screenWidth
+        "movss %%xmm0, %[x]       \n" // Store xmm0 result into x
         : [x] "=m" (x)
-        : [t] "x" (t), [screenWidth] "x" (screenWidth)
-        : 
+        : [t] "m" (t), [screenWidth] "m" (screenWidth)
+        : "xmm0"
     );
 
-    return (Vector2){x, y};
+    Vector2 result = {x, y};
+    double end = GetHighPrecisionTime();
+    *executionTime += (end - start);
+    return result;
 }
 
-Vector2 CalculateSinusoidalPath(float t) {
+Vector2 CalculateSinusoidalPath(float t, double *executionTime) {
+    double start = GetHighPrecisionTime();
     float x, y;
-    float screenWidth = SCREEN_WIDTH;  // Load SCREEN_WIDTH into a local variable
-    float four_pi = 4.0f * M_PI, amplitude = 100.0f, offset = SCREEN_HEIGHT / 2.0f;
-
-    // Compute y using C's sinf function
+    float screenWidth = SCREEN_WIDTH, four_pi = 4.0f * M_PI, amplitude = 100.0f, offset = SCREEN_HEIGHT / 2.0f;
     y = offset + amplitude * sinf(t * four_pi);
 
+    // Optimized inline assembly using SSE
     __asm__ volatile (
-        // Compute x = t * SCREEN_WIDTH
-        "mulss %[screenWidth], %[t]\n"
-        "movss %[t], %[x]\n"
-
+        "movss %[t], %%xmm0       \n" // Load t into xmm0
+        "mulss %[screenWidth], %%xmm0 \n" // xmm0 = t * screenWidth
+        "movss %%xmm0, %[x]       \n" // Store xmm0 result into x
         : [x] "=m" (x)
-        : [t] "x" (t), [screenWidth] "x" (screenWidth)
-        : 
+        : [t] "m" (t), [screenWidth] "m" (screenWidth)
+        : "xmm0"
     );
 
-    return (Vector2){x, y};
+    Vector2 result = {x, y};
+    double end = GetHighPrecisionTime();
+    *executionTime += (end - start);
+    return result;
 }
 
-// Benchmark Function
-void BenchmarkPathFunctions(double *straightTime, double *angularTime, double *convexTime, double *sinusoidalTime) {
-    clock_t start, end;
-    const int iterations = 10000000;  // Increase iterations for more accurate timing
-    
-    start = clock();
-    for (int i = 0; i < iterations; i++) {
-        for (float t = 0.0f; t < 1.0f; t += 0.001f) {
-            CalculateStraightPath(t);
-        }
-    }
-    end = clock();
-    *straightTime = ((double)(end - start)) / CLOCKS_PER_SEC;
-
-    start = clock();
-    for (int i = 0; i < iterations; i++) {
-        for (float t = 0.0f; t < 1.0f; t += 0.001f) {
-            CalculateAngularPath(t);
-        }
-    }
-    end = clock();
-    *angularTime = ((double)(end - start)) / CLOCKS_PER_SEC;
-
-    start = clock();
-    for (int i = 0; i < iterations; i++) {
-        for (float t = 0.0f; t < 1.0f; t += 0.001f) {
-            CalculateConvexPath(t);
-        }
-    }
-    end = clock();
-    *convexTime = ((double)(end - start)) / CLOCKS_PER_SEC;
-
-    start = clock();
-    for (int i = 0; i < iterations; i++) {
-        for (float t = 0.0f; t < 1.0f; t += 0.001f) {
-            CalculateSinusoidalPath(t);
-        }
-    }
-    end = clock();
-    *sinusoidalTime = ((double)(end - start)) / CLOCKS_PER_SEC;
-}
 
 int main() {
     // Initialize Raylib window
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Colorful Striped Ball Paths with Benchmark");
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Colorful Striped Ball Paths with Execution Time");
     SetTargetFPS(60);
 
     // Ball properties
@@ -180,16 +155,33 @@ int main() {
         .colorCount = 6
     };
 
-    // Path selection and movement
+    // Execution time tracking
+    double straightTime = 0.0, angularTime = 0.0, convexTime = 0.0, sinusoidalTime = 0.0;
+
+    // Calculate execution time for each path
+    for (float t = 0.0f; t <= 1.0f; t += 0.01f) {
+        double tempTime = 0.0;
+        CalculateStraightPath(t, &tempTime);
+        straightTime += tempTime;
+
+        tempTime = 0.0;
+        CalculateAngularPath(t, &tempTime);
+        angularTime += tempTime;
+
+        tempTime = 0.0;
+        CalculateConvexPath(t, &tempTime);
+        convexTime += tempTime;
+
+        tempTime = 0.0;
+        CalculateSinusoidalPath(t, &tempTime);
+        sinusoidalTime += tempTime;
+    }
+
+    // Main game loop
     int selectedPath = PATH_STRAIGHT;
     float t = 0.0f;
     bool isMoving = false;
 
-    // Benchmark results
-    double straightTime = 0.0, angularTime = 0.0, convexTime = 0.0, sinusoidalTime = 0.0;
-    bool benchmarkDone = false;
-
-    // Main game loop
     while (!WindowShouldClose()) {
         // Handle user input
         if (IsKeyPressed(KEY_ONE)) selectedPath = PATH_STRAIGHT;
@@ -200,30 +192,24 @@ int main() {
 
         // Update ball position and rotation
         if (isMoving) {
-            t += 0.01f;  // Increment t for continuous movement
-            if (t > 1.0f) t = 0.0f;  // Reset t to 0 when it exceeds 1.0 for looping
+            t += 0.01f;
+            if (t > 1.0f) t = 0.0f; // Reset t for looping
 
             switch (selectedPath) {
                 case PATH_STRAIGHT:
-                    ball.position = CalculateStraightPath(t);
+                    ball.position = CalculateStraightPath(t, &straightTime);
                     break;
                 case PATH_ANGULAR:
-                    ball.position = CalculateAngularPath(t);
+                    ball.position = CalculateAngularPath(t, &angularTime);
                     break;
                 case PATH_CONVEX:
-                    ball.position = CalculateConvexPath(t);
+                    ball.position = CalculateConvexPath(t, &convexTime);
                     break;
                 case PATH_SINUSOIDAL:
-                    ball.position = CalculateSinusoidalPath(t);
+                    ball.position = CalculateSinusoidalPath(t, &sinusoidalTime);
                     break;
             }
-            ball.rotation += 5.0f; // Rotate the ball
-        }
-
-        // Run benchmark if not already done
-        if (!benchmarkDone) {
-            BenchmarkPathFunctions(&straightTime, &angularTime, &convexTime, &sinusoidalTime);
-            benchmarkDone = true;
+            ball.rotation += 5.0f;
         }
 
         // Draw everything
@@ -233,14 +219,14 @@ int main() {
         // Draw the goal/wall
         DrawRectangle(SCREEN_WIDTH - 10, 0, 10, SCREEN_HEIGHT, BLACK);
 
+        // Draw execution times for all paths
+        DrawText(TextFormat("Execution Time of Straight Path: %.8f seconds", straightTime), 10, 10, 20, DARKGRAY);
+        DrawText(TextFormat("Execution Time of Angular Path: %.8f seconds", angularTime), 10, 40, 20, DARKGRAY);
+        DrawText(TextFormat("Execution Time of Convex Path: %.8f seconds", convexTime), 10, 70, 20, DARKGRAY);
+        DrawText(TextFormat("Execution Time of Sinusoidal Path: %.8f seconds", sinusoidalTime), 10, 100, 20, DARKGRAY);
+
         // Draw the ball
         DrawStripedBall(ball);
-
-        // Draw benchmark results
-        DrawText(TextFormat("Straight Path: %.6f seconds", straightTime), 10, 10, 20, DARKGRAY);
-        DrawText(TextFormat("Angular Path: %.6f seconds", angularTime), 10, 40, 20, DARKGRAY);
-        DrawText(TextFormat("Convex Path: %.6f seconds", convexTime), 10, 70, 20, DARKGRAY);
-        DrawText(TextFormat("Sinusoidal Path: %.6f seconds", sinusoidalTime), 10, 100, 20, DARKGRAY);
 
         // Draw instructions
         DrawText("Press 1: Straight Path", 10, SCREEN_HEIGHT - 120, 20, DARKGRAY);
