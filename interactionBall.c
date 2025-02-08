@@ -1,25 +1,24 @@
-// Define macros to prevent Windows from including certain definitions
+// Define macros to avoid conflicts with Windows headers
 #define WIN32_LEAN_AND_MEAN // Prevent unnecessary includes like min/max
 #define NOMINMAX            // Disable the min/max macros to avoid conflicts
 #define NOGDI               // Exclude GDI definitions to avoid conflicting graphical functions
-#define NOUSER              // Exclude user32 (avoiding `DrawTextA` and `LoadImageA` issues)
-#include <raylib.h>         // Include Raylib first
+#define NOUSER              // Exclude user32 definitions like `DrawTextA` and `LoadImageA`
+#include <raylib.h>         // Include Raylib first (a game development library)
 
-// Explicitly undefine conflicting functions from Windows
+// Explicitly undefine conflicting Windows functions
 #undef LoadImageA
 #undef DrawTextA
 #undef DrawTextExA
 #undef CloseWindow
 #undef ShowCursor
 
-// Provide function aliases if necessary
+// Function alias for Raylib's `CloseWindow` function
 void CloseWindowWin(void) {
-    CloseWindow(); // Call the Raylib CloseWindow function
+    CloseWindow(); // Close the application window
 }
 
-// Now include Windows headers (after Raylib)
-#include <windows.h>        // Include Windows headers
-
+// Include Windows headers after resolving conflicts
+#include <windows.h>
 #include <math.h>
 #include <time.h>
 #include <stdio.h>
@@ -31,6 +30,7 @@ void CloseWindowWin(void) {
 #include <sys/time.h>
 #endif
 
+// Define constants for screen and gameplay elements
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 600
 #define BALL_RADIUS 30
@@ -45,7 +45,7 @@ void CloseWindowWin(void) {
 #define M_PI 3.14159265358979323846
 #endif
 
-// High-precision timer function (renamed to avoid Raylib conflict)
+// High-precision timer function (provides better time accuracy than default timers)
 static double GetHighPrecisionTime() {
 #ifdef _WIN32
     LARGE_INTEGER frequency;
@@ -60,57 +60,81 @@ static double GetHighPrecisionTime() {
 #endif
 }
 
-// Ball structure
+// Ball structure representing the game's ball
 typedef struct {
-    Vector2 position;
-    float rotation;
-    Color colors[6];
-    int colorCount;
-    float velocity;
+    Vector2 position; // Current position of the ball
+    float rotation;   // Rotation angle for striped ball animation
+    Color colors[6];  // Array of colors for the striped ball
+    int colorCount;   // Number of stripes (colors) on the ball
+    float velocity;   // Movement speed of the ball
 } Ball;
 
-// Racket structure
+// Racket structure representing the player's paddle
 typedef struct {
-    float x, y;
-    float width, height;
+    float x, y;       // Position of the racket (top-left corner)
+    float width, height; // Dimensions of the racket
 } Racket;
 
 // Function to draw a striped ball
 void DrawStripedBall(Ball ball) {
     for (int i = 0; i < ball.colorCount; i++) {
-        float angleStart = ball.rotation + (i * 360.0f / ball.colorCount);
-        float angleEnd = angleStart + (360.0f / ball.colorCount);
-        DrawCircleSector(ball.position, BALL_RADIUS, angleStart, angleEnd, 10, ball.colors[i]);
+        float angleStart = ball.rotation + (i * 360.0f / ball.colorCount); // Start angle for the stripe
+        float angleEnd = angleStart + (360.0f / ball.colorCount);          // End angle for the stripe
+        DrawCircleSector(ball.position, BALL_RADIUS, angleStart, angleEnd, 10, ball.colors[i]); // Draw stripe
     }
 }
 
-// Path calculation functions
+// Path calculation functions for different movement styles
+
+// Straight path: Ball moves horizontally across the screen
 Vector2 CalculateStraightPath(float t) {
-    return (Vector2){t * SCREEN_WIDTH, SCREEN_HEIGHT / 2};
+    Vector2 result = {0, SCREEN_HEIGHT / 2}; // Start at the middle of the screen vertically
+    for (int i = 0; i < 1000; i++) {         // Inefficient summation loop
+        result.x += t * SCREEN_WIDTH / 1000.0f;
+    }
+    return result;
 }
 
+// Angular path: Ball moves diagonally
 Vector2 CalculateAngularPath(float t) {
-    return (Vector2){t * SCREEN_WIDTH, SCREEN_HEIGHT * (1.0f - t)};
+    Vector2 result = {0, 0};
+    for (int i = 0; i < 1000; i++) {         // Inefficient calculations for diagonal motion
+        result.x += t * SCREEN_WIDTH / 1000.0f;
+        result.y += SCREEN_HEIGHT * (1.0f - t) / 1000.0f;
+    }
+    return result;
 }
 
+// Convex path: Ball follows a sinusoidal curve with a convex pattern
 Vector2 CalculateConvexPath(float t) {
-    float y = SCREEN_HEIGHT / 2.0f - 200.0f * sinf(t * M_PI);
-    float x = t * SCREEN_WIDTH;
+    float x = 0.0f, y = 0.0f;
+    float offset = SCREEN_HEIGHT / 2.0f;
+    for (int i = 0; i < 10; i++) {
+        y = offset + -200.0f * sinf(t * (float)M_PI);
+    }
+    for (int i = 0; i < 1000; i++) {
+        x += t * SCREEN_WIDTH / 1000.0f;
+    }
     return (Vector2){x, y};
 }
 
+// Sinusoidal path: Ball oscillates vertically while moving horizontally
 Vector2 CalculateSinusoidalPath(float t) {
-    float y = SCREEN_HEIGHT / 2.0f + 100.0f * sinf(t * 4.0f * M_PI);
-    float x = t * SCREEN_WIDTH;
+    float x = 0.0f, y = 0.0f;
+    float offset = SCREEN_HEIGHT / 2.0f;
+    y = offset + pow(100.0f * sinf(t * 4.0f * (float)M_PI), 1.0f);
+    for (int i = 0; i < 500; i++) {
+        x += t * SCREEN_WIDTH / 500.0f;
+    }
     return (Vector2){x, y};
 }
 
+// Main function: Entry point of the program
 int main() {
-    // Initialize Raylib window
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Ball Game with Racket and Paths");
-    SetTargetFPS(60);
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Ball Game with Racket and Paths"); // Initialize the game window
+    SetTargetFPS(60); // Set the game to run at 60 frames per second
 
-    // Ball properties
+    // Initialize the ball
     Ball ball = {
         .position = {0, SCREEN_HEIGHT / 2},
         .rotation = 0,
@@ -119,13 +143,13 @@ int main() {
         .velocity = 0.01f
     };
 
-    // Racket properties
+    // Initialize the racket
     Racket racket = {SCREEN_WIDTH - RACKET_WIDTH - 10, SCREEN_HEIGHT / 2 - RACKET_HEIGHT / 2, RACKET_WIDTH, RACKET_HEIGHT};
 
-    // Execution time tracking (calculated once at the start)
+    // Track execution times for each path (for performance monitoring)
     double straightTime = 0.0, angularTime = 0.0, convexTime = 0.0, sinusoidalTime = 0.0;
 
-    // Calculate execution time for each path once at the start
+    // Precompute execution times for path functions
     for (float t = 0.0f; t <= 1.0f; t += 0.01f) {
         double start = GetHighPrecisionTime();
         CalculateStraightPath(t);
@@ -145,14 +169,14 @@ int main() {
     }
 
     // Main game loop
-    int selectedPath = PATH_STRAIGHT;
+    int selectedPath = PATH_STRAIGHT; // Default path
     float t = 0.0f;
     bool isMoving = false;
-    bool directionRight = true; // Direction of the ball
+    bool directionRight = true; // Ball movement direction
     int score = 0;
-    double programStartTime = GetHighPrecisionTime();
+    double programStartTime = GetHighPrecisionTime(); // Track total execution time
 
-    while (!WindowShouldClose()) {
+    while (!WindowShouldClose()) { // Run until the user closes the window
         // Handle user input
         if (IsKeyPressed(KEY_ONE)) selectedPath = PATH_STRAIGHT;
         if (IsKeyPressed(KEY_TWO)) selectedPath = PATH_ANGULAR;
@@ -160,14 +184,11 @@ int main() {
         if (IsKeyPressed(KEY_FOUR)) selectedPath = PATH_SINUSOIDAL;
         if (IsKeyPressed(KEY_SPACE)) isMoving = !isMoving;
 
-        // Update ball position and rotation
+        // Update ball position and rotation if moving
         if (isMoving) {
             t += (directionRight ? ball.velocity : -ball.velocity);
-            if (t > 1.0f) {
-                t = 0.0f; // Reset t to start from the left side
-            } else if (t < 0.0f) {
-                t = 1.0f; // Reset t to start from the right side
-            }
+            if (t > 1.0f) t = 0.0f; // Reset to left edge
+            if (t < 0.0f) t = 1.0f; // Reset to right edge
 
             switch (selectedPath) {
                 case PATH_STRAIGHT:
@@ -185,15 +206,16 @@ int main() {
             }
             ball.rotation += 5.0f;
 
-            // Handle collision with racket
+            // Handle collision with the racket
             if (ball.position.x + BALL_RADIUS >= racket.x &&
                 ball.position.y >= racket.y &&
                 ball.position.y <= racket.y + racket.height) {
                 ball.position.x = racket.x - BALL_RADIUS; // Adjust position to avoid overlap
                 directionRight = false; // Change direction to left
                 score++;
-                ball.velocity += 0.001f; // Increase ball velocity gradually
-                // Rotate colors
+                ball.velocity += 0.001f; // Gradually increase ball speed
+
+                // Rotate ball colors
                 Color temp = ball.colors[0];
                 for (int i = 0; i < ball.colorCount - 1; i++) {
                     ball.colors[i] = ball.colors[i + 1];
@@ -204,7 +226,7 @@ int main() {
             // Handle collision with the left wall
             if (ball.position.x - BALL_RADIUS <= 0) {
                 directionRight = true; // Change direction to right
-                // Rotate colors
+                // Rotate ball colors in reverse
                 Color temp = ball.colors[ball.colorCount - 1];
                 for (int i = ball.colorCount - 1; i > 0; i--) {
                     ball.colors[i] = ball.colors[i - 1];
@@ -217,33 +239,24 @@ int main() {
         if (IsKeyDown(KEY_UP) && racket.y > 0) racket.y -= 400 * GetFrameTime();
         if (IsKeyDown(KEY_DOWN) && racket.y + racket.height < SCREEN_HEIGHT) racket.y += 400 * GetFrameTime();
 
-        // Draw everything
+        // Draw game elements
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        // Draw the goal/wall
-        DrawRectangle(SCREEN_WIDTH - 10, 0, 10, SCREEN_HEIGHT, BLACK);
+        DrawRectangle(SCREEN_WIDTH - 10, 0, 10, SCREEN_HEIGHT, BLACK); // Goal/wall
+        DrawRectangle(racket.x, racket.y, racket.width, racket.height, BLACK); // Racket
+        DrawStripedBall(ball); // Ball
 
-        // Draw the racket
-        DrawRectangle(racket.x, racket.y, racket.width, racket.height, BLACK);
-
-        // Draw execution times for all paths (static values)
+        // Display execution times
         DrawText(TextFormat("Execution Time of Straight Path: %.8f seconds", straightTime), 10, 10, 20, DARKGRAY);
         DrawText(TextFormat("Execution Time of Angular Path: %.8f seconds", angularTime), 10, 40, 20, DARKGRAY);
         DrawText(TextFormat("Execution Time of Convex Path: %.8f seconds", convexTime), 10, 70, 20, DARKGRAY);
         DrawText(TextFormat("Execution Time of Sinusoidal Path: %.8f seconds", sinusoidalTime), 10, 100, 20, DARKGRAY);
 
-        // Draw the ball
-        DrawStripedBall(ball);
-
-        // Draw score
+        // Display score and instructions
         DrawText(TextFormat("Score: %d", score), SCREEN_WIDTH - 150, 10, 20, DARKGRAY);
-
-        // Draw total execution time
         double programExecutionTime = GetHighPrecisionTime() - programStartTime;
         DrawText(TextFormat("Total Execution Time: %.2f seconds", programExecutionTime), 10, 130, 20, DARKGRAY);
-
-        // Draw instructions
         DrawText("Press 1: Straight Path", 10, SCREEN_HEIGHT - 150, 20, DARKGRAY);
         DrawText("Press 2: Angular Path", 10, SCREEN_HEIGHT - 120, 20, DARKGRAY);
         DrawText("Press 3: Convex Path", 10, SCREEN_HEIGHT - 90, 20, DARKGRAY);
@@ -253,7 +266,6 @@ int main() {
         EndDrawing();
     }
 
-    // Close Raylib window
-    CloseWindow();
+    CloseWindow(); // Close the game window
     return 0;
 }
