@@ -66,6 +66,7 @@ typedef struct {
     float rotation;
     Color colors[6];
     int colorCount;
+    float velocity;
 } Ball;
 
 // Racket structure
@@ -84,62 +85,24 @@ void DrawStripedBall(Ball ball) {
 }
 
 // Path calculation functions
-Vector2 CalculateStraightPath(float t, double *executionTime) {
-    double start = GetHighPrecisionTime();
-    Vector2 result = (Vector2){t * SCREEN_WIDTH, SCREEN_HEIGHT / 2};
-    double end = GetHighPrecisionTime();
-    *executionTime += (end - start);
-    return result;
+Vector2 CalculateStraightPath(float t) {
+    return (Vector2){t * SCREEN_WIDTH, SCREEN_HEIGHT / 2};
 }
 
-Vector2 CalculateAngularPath(float t, double *executionTime) {
-    double start = GetHighPrecisionTime();
-    Vector2 result = (Vector2){t * SCREEN_WIDTH, SCREEN_HEIGHT * (1.0f - t)};
-    double end = GetHighPrecisionTime();
-    *executionTime += (end - start);
-    return result;
+Vector2 CalculateAngularPath(float t) {
+    return (Vector2){t * SCREEN_WIDTH, SCREEN_HEIGHT * (1.0f - t)};
 }
 
-Vector2 CalculateConvexPath(float t, double *executionTime) {
-    double start = GetHighPrecisionTime();
-    float x, y;
-    float screenWidth = SCREEN_WIDTH, pi = (float)M_PI, neg_amp = -200.0f, offset = SCREEN_HEIGHT / 2.0f;
-
-    // Introduce unnecessary loop for inefficiency
-    for (int i = 0; i < 10; i++) {
-        y = offset + neg_amp * sinf(t * pi);
-    }
-
-    // Perform inefficient calculations for x
-    x = 0.0f;
-    for (int i = 0; i < 1000; i++) {
-        x += t * screenWidth / 1000.0f; // Inefficient summation
-    }
-
-    Vector2 result = {x, y};
-    double end = GetHighPrecisionTime();
-    *executionTime += (end - start);
-    return result;
+Vector2 CalculateConvexPath(float t) {
+    float y = SCREEN_HEIGHT / 2.0f - 200.0f * sinf(t * M_PI);
+    float x = t * SCREEN_WIDTH;
+    return (Vector2){x, y};
 }
 
-Vector2 CalculateSinusoidalPath(float t, double *executionTime) {
-    double start = GetHighPrecisionTime();
-    float x, y;
-    float screenWidth = SCREEN_WIDTH, four_pi = 4.0f * M_PI, amplitude = 100.0f, offset = SCREEN_HEIGHT / 2.0f;
-
-    // Inefficient power operation
-    y = offset + pow(amplitude * sinf(t * four_pi), 1.0f);
-
-    // Use inefficient logic for x
-    x = 0.0f;
-    for (int i = 0; i < 500; i++) {
-        x += t * screenWidth / 500.0f; // Slow summation
-    }
-
-    Vector2 result = {x, y};
-    double end = GetHighPrecisionTime();
-    *executionTime += (end - start);
-    return result;
+Vector2 CalculateSinusoidalPath(float t) {
+    float y = SCREEN_HEIGHT / 2.0f + 100.0f * sinf(t * 4.0f * M_PI);
+    float x = t * SCREEN_WIDTH;
+    return (Vector2){x, y};
 }
 
 int main() {
@@ -152,32 +115,33 @@ int main() {
         .position = {0, SCREEN_HEIGHT / 2},
         .rotation = 0,
         .colors = {RED, ORANGE, YELLOW, GREEN, BLUE, PURPLE},
-        .colorCount = 6
+        .colorCount = 6,
+        .velocity = 0.01f
     };
 
     // Racket properties
     Racket racket = {SCREEN_WIDTH - RACKET_WIDTH - 10, SCREEN_HEIGHT / 2 - RACKET_HEIGHT / 2, RACKET_WIDTH, RACKET_HEIGHT};
 
-    // Execution time tracking
+    // Execution time tracking (calculated once at the start)
     double straightTime = 0.0, angularTime = 0.0, convexTime = 0.0, sinusoidalTime = 0.0;
 
-    // Calculate execution time for each path
+    // Calculate execution time for each path once at the start
     for (float t = 0.0f; t <= 1.0f; t += 0.01f) {
-        double tempTime = 0.0;
-        CalculateStraightPath(t, &tempTime);
-        straightTime += tempTime;
+        double start = GetHighPrecisionTime();
+        CalculateStraightPath(t);
+        straightTime += GetHighPrecisionTime() - start;
 
-        tempTime = 0.0;
-        CalculateAngularPath(t, &tempTime);
-        angularTime += tempTime;
+        start = GetHighPrecisionTime();
+        CalculateAngularPath(t);
+        angularTime += GetHighPrecisionTime() - start;
 
-        tempTime = 0.0;
-        CalculateConvexPath(t, &tempTime);
-        convexTime += tempTime;
+        start = GetHighPrecisionTime();
+        CalculateConvexPath(t);
+        convexTime += GetHighPrecisionTime() - start;
 
-        tempTime = 0.0;
-        CalculateSinusoidalPath(t, &tempTime);
-        sinusoidalTime += tempTime;
+        start = GetHighPrecisionTime();
+        CalculateSinusoidalPath(t);
+        sinusoidalTime += GetHighPrecisionTime() - start;
     }
 
     // Main game loop
@@ -185,6 +149,8 @@ int main() {
     float t = 0.0f;
     bool isMoving = false;
     bool directionRight = true; // Direction of the ball
+    int score = 0;
+    double programStartTime = GetHighPrecisionTime();
 
     while (!WindowShouldClose()) {
         // Handle user input
@@ -196,36 +162,54 @@ int main() {
 
         // Update ball position and rotation
         if (isMoving) {
-            t += (directionRight ? 0.01f : -0.01f);
-            if (t > 1.0f || t < 0.0f) {
-                directionRight = !directionRight; // Reverse direction
-                t = directionRight ? 0.0f : 1.0f;
+            t += (directionRight ? ball.velocity : -ball.velocity);
+            if (t > 1.0f) {
+                t = 0.0f; // Reset t to start from the left side
+            } else if (t < 0.0f) {
+                t = 1.0f; // Reset t to start from the right side
             }
 
             switch (selectedPath) {
                 case PATH_STRAIGHT:
-                    ball.position = CalculateStraightPath(t, &straightTime);
+                    ball.position = CalculateStraightPath(t);
                     break;
                 case PATH_ANGULAR:
-                    ball.position = CalculateAngularPath(t, &angularTime);
+                    ball.position = CalculateAngularPath(t);
                     break;
                 case PATH_CONVEX:
-                    ball.position = CalculateConvexPath(t, &convexTime);
+                    ball.position = CalculateConvexPath(t);
                     break;
                 case PATH_SINUSOIDAL:
-                    ball.position = CalculateSinusoidalPath(t, &sinusoidalTime);
+                    ball.position = CalculateSinusoidalPath(t);
                     break;
             }
             ball.rotation += 5.0f;
 
             // Handle collision with racket
-            // Handle collision with racket
             if (ball.position.x + BALL_RADIUS >= racket.x &&
                 ball.position.y >= racket.y &&
                 ball.position.y <= racket.y + racket.height) {
                 ball.position.x = racket.x - BALL_RADIUS; // Adjust position to avoid overlap
-                directionRight = !directionRight; // Reverse direction
-                t = directionRight ? 0.0f : 1.0f; // Reset t for movement in the new direction
+                directionRight = false; // Change direction to left
+                score++;
+                ball.velocity += 0.001f; // Increase ball velocity gradually
+                // Rotate colors
+                Color temp = ball.colors[0];
+                for (int i = 0; i < ball.colorCount - 1; i++) {
+                    ball.colors[i] = ball.colors[i + 1];
+                }
+                ball.colors[ball.colorCount - 1] = temp;
+            }
+
+            // Handle collision with the left wall
+            if (ball.position.x - BALL_RADIUS <= 0) {
+                directionRight = true; // Change direction to right
+                // Rotate colors
+                Color temp = ball.colors[ball.colorCount - 1];
+                for (int i = ball.colorCount - 1; i > 0; i--) {
+                    ball.colors[i] = ball.colors[i - 1];
+                }
+                ball.colors[0] = temp;
             }
         }
 
@@ -243,7 +227,7 @@ int main() {
         // Draw the racket
         DrawRectangle(racket.x, racket.y, racket.width, racket.height, BLACK);
 
-        // Draw execution times for all paths
+        // Draw execution times for all paths (static values)
         DrawText(TextFormat("Execution Time of Straight Path: %.8f seconds", straightTime), 10, 10, 20, DARKGRAY);
         DrawText(TextFormat("Execution Time of Angular Path: %.8f seconds", angularTime), 10, 40, 20, DARKGRAY);
         DrawText(TextFormat("Execution Time of Convex Path: %.8f seconds", convexTime), 10, 70, 20, DARKGRAY);
@@ -251,6 +235,13 @@ int main() {
 
         // Draw the ball
         DrawStripedBall(ball);
+
+        // Draw score
+        DrawText(TextFormat("Score: %d", score), SCREEN_WIDTH - 150, 10, 20, DARKGRAY);
+
+        // Draw total execution time
+        double programExecutionTime = GetHighPrecisionTime() - programStartTime;
+        DrawText(TextFormat("Total Execution Time: %.2f seconds", programExecutionTime), 10, 130, 20, DARKGRAY);
 
         // Draw instructions
         DrawText("Press 1: Straight Path", 10, SCREEN_HEIGHT - 150, 20, DARKGRAY);
